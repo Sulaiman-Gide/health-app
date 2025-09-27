@@ -151,11 +151,16 @@ export default function EmergenciesScreen() {
     newStatus: EmergencyReport["status"]
   ) => {
     try {
-      // Use the admin client to bypass RLS if needed
-      const { data, error } = await supabase.rpc("update_emergency_status", {
-        emergency_id: id,
-        new_status: newStatus,
-      });
+      const normalizedStatus =
+        newStatus.toLowerCase() as EmergencyReport["status"];
+
+      const { error } = await supabase
+        .from("emergency_reports")
+        .update({
+          status: normalizedStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
 
       if (error) throw error;
 
@@ -165,7 +170,7 @@ export default function EmergenciesScreen() {
           emergency.id === id
             ? {
                 ...emergency,
-                status: newStatus,
+                status: normalizedStatus,
                 updated_at: new Date().toISOString(),
               }
             : emergency
@@ -260,12 +265,6 @@ export default function EmergenciesScreen() {
         </View>
         {item.updated_at !== item.created_at && (
           <View style={{ flexDirection: "row", alignItems: "center" }}>
-            <Ionicons
-              name="refresh-outline"
-              size={18}
-              color={colors.text}
-              style={{ marginRight: 6 }}
-            />
             <ThemedText style={styles.metaText}>
               Updated: {formatDate(item.updated_at)}
             </ThemedText>
