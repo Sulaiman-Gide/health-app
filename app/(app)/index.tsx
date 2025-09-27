@@ -5,21 +5,25 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/auth";
 import { HealthMetrics } from "@/types/health";
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useState } from "react";
+import { debounce } from "lodash";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
   View,
 } from "react-native";
+import MapView, { Marker } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
 import seedrandom from "seedrandom";
 
@@ -42,6 +46,18 @@ const getTodaysSeed = () => {
     yesterday.setDate(yesterday.getDate() - 1);
     return yesterday.getTime().toString();
   }
+};
+
+const throttle = (func: Function, limit: number) => {
+  let inThrottle: boolean;
+  return function (this: any, ...args: any[]) {
+    const context = this;
+    if (!inThrottle) {
+      func.apply(context, args);
+      inThrottle = true;
+      setTimeout(() => (inThrottle = false), limit);
+    }
+  };
 };
 
 const generateDailyValues = (seed: string) => {
@@ -164,51 +180,176 @@ export default function HomeScreen() {
     longitude: number | null;
   }
 
-  const [location, setLocation] = useState<LocationInfo | null>(null);
+  const [isSendingEmergency, setIsSendingEmergency] = useState(false);
+  const [lastGeocodeTime, setLastGeocodeTime] = useState<number>(0);
+  const [geocodeCache, setGeocodeCache] = useState<{ [key: string]: any }>({});
+  const mapRef = useRef<MapView>(null);
+  // Add these state variables at the top of your HomeScreen component
+  const [location, setLocation] = useState<Location.LocationObject | null>(
+    null
+  );
+  const [locationInfo, setLocationInfo] = useState<{
+    city: string | null;
+    region: string | null;
+    latitude: number | null;
+    longitude: number | null;
+  } | null>(null);
 
-  useEffect(() => {
-    const getLocation = async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted") {
-          console.log("Location permission denied");
-          return;
+  // Send emergency report
+  const sendEmergencyReport = async () => {
+    if (!location) {
+      Alert.alert(
+        "Location Error",
+        "Please enable location services to send an emergency report"
+      );
+      return;
+    }
+
+    try {
+      setIsSendingEmergency(true);
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("blood_type, seasonal_allergies, medications")
+        .eq("id", session?.user.id)
+        .single();
+
+      const { error } = await supabase.from("emergency_reports").insert([
+        {
+          user_id: session?.user.id,
+          blood_type: profile?.blood_type,
+          seasonal_allergies: profile?.seasonal_allergies,
+          medications: profile?.medications,
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          status: "pending",
+        },
+      ]);
+
+      if (error) throw error;
+
+      // Format address using cached location info if available
+      let formattedAddress = "Unknown location";
+
+      if (locationInfo && locationInfo.city && locationInfo.region) {
+        // Use cached location info
+        formattedAddress = `${locationInfo.city}, ${locationInfo.region}`;
+      } else {
+        try {
+          // Fallback to reverse geocoding if no cached info
+          const address = await Location.reverseGeocodeAsync({
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          });
+
+          if (address[0]) {
+            formattedAddress = `${address[0].name || ""} ${
+              address[0].street || ""
+            } ${address[0].city || ""} ${address[0].region || ""}`.trim();
+          }
+        } catch (error) {
+          console.warn("Error getting address for emergency report:", error);
+          // Use coordinates as fallback
+          formattedAddress = `Location: ${location.coords.latitude.toFixed(
+            4
+          )}, ${location.coords.longitude.toFixed(4)}`;
         }
+      }
 
-        // Get current position
-        const position = await Location.getCurrentPositionAsync({});
+      Alert.alert(
+        "Emergency Alert Sent",
+        "Help is on the way! Your location and medical information have been shared with emergency contacts."
+      );
+    } catch (error) {
+      console.error("Error sending emergency report:", error);
+      Alert.alert(
+        "Error",
+        "Failed to send emergency report. Please try again."
+      );
+    } finally {
+      setIsSendingEmergency(false);
+    }
+  };
 
-        // Reverse geocode to get address information
+  const getLocation = useCallback(async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission to access location was denied");
+        return;
+      }
+
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Low,
+      });
+
+      setLocation(position);
+
+      // Generate a cache key based on coordinates (rounded to 4 decimal places)
+      const cacheKey = `${position.coords.latitude.toFixed(
+        4
+      )},${position.coords.longitude.toFixed(4)}`;
+
+      // Check cache first
+      if (geocodeCache[cacheKey]) {
+        setLocationInfo(geocodeCache[cacheKey]);
+        return;
+      }
+
+      // Rate limiting - don't make more than 1 request per 2 seconds
+      const now = Date.now();
+      if (now - lastGeocodeTime < 2000) {
+        console.log("Skipping geocode - rate limited");
+        return;
+      }
+
+      setLastGeocodeTime(now);
+
+      try {
         const address = await Location.reverseGeocodeAsync({
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         });
 
         if (address.length > 0) {
-          setLocation({
+          const locationInfo = {
             city: address[0].city || null,
             region: address[0].region || null,
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
-          });
-        } else {
-          // If no address found, still set location with coordinates
-          setLocation({
-            city: null,
-            region: null,
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-          });
-        }
-      } catch (error) {
-        console.error("Error getting location:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
+          };
 
-    getLocation();
-  }, []);
+          // Cache the result
+          setGeocodeCache((prev) => ({
+            ...prev,
+            [cacheKey]: locationInfo,
+          }));
+
+          setLocationInfo(locationInfo);
+        }
+      } catch (geocodeError) {
+        console.warn("Reverse geocoding error:", geocodeError);
+        // Don't throw the error, just log it
+      }
+    } catch (error) {
+      console.error("Error getting location:", error);
+    }
+  }, [geocodeCache, lastGeocodeTime]);
+
+  // Debounce the location updates
+  const debouncedGetLocation = useCallback(
+    debounce(() => {
+      getLocation();
+    }, 1000), // 1 second debounce
+    [getLocation]
+  );
+
+  useEffect(() => {
+    debouncedGetLocation();
+    // Cleanup
+    return () => {
+      debouncedGetLocation.cancel();
+    };
+  }, [debouncedGetLocation]);
 
   const generateRandomHealthMetrics = (date: Date) => {
     // Create a more unique seed by including hours and minutes
@@ -435,44 +576,9 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, []);
 
-  // Function to get user's location
-  const getLocation = async () => {
-    try {
-      // Request permission
-      const { status } = await Location.requestForegroundPermissionsAsync();
-
-      if (status !== "granted") {
-        console.log("Permission to access location was denied");
-        return;
-      }
-
-      // Get current position
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Low, // Lower accuracy is sufficient for city/region
-      });
-
-      // Reverse geocode to get address
-      const address = await Location.reverseGeocodeAsync({
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-      });
-
-      if (address.length > 0) {
-        setLocation({
-          city: address[0].city || null,
-          region: address[0].region || null,
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        });
-      }
-    } catch (error) {
-      //console.error("Error getting location:", error);
-    }
-  };
-
   useEffect(() => {
-    // Fetch location when component mounts
-    getLocation();
+    // Fetch location when component mounts using debounced version
+    debouncedGetLocation();
 
     const fetchData = async () => {
       const now = new Date();
@@ -593,11 +699,58 @@ export default function HomeScreen() {
     fetchHealthMetrics();
   }, [fetchHealthMetrics]);
 
-  // Set up realtime subscription for health metrics
+  // Set up realtime subscriptions and location updates
   useEffect(() => {
     if (!session?.user?.id) return;
 
-    const subscription = supabase
+    let isMounted = true;
+    let locationSubscription: Location.LocationSubscription | null = null;
+    let healthSubscription: any = null;
+    let contactsSubscription: any = null;
+
+    // Set up location updates
+    const setupLocation = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+          Alert.alert("Permission to access location was denied");
+          return;
+        }
+
+        // Get initial position
+        const position = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Low,
+        });
+
+        if (isMounted) {
+          setLocation(position);
+
+          // Use debounced getLocation which includes caching and rate limiting
+          debouncedGetLocation();
+        }
+
+        // Watch position with lower accuracy and higher distance interval to reduce updates
+        locationSubscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Low, // Lower accuracy to reduce battery usage
+            distanceInterval: 100, // Update every 100 meters instead of 10
+            timeInterval: 30000, // Update at most every 30 seconds
+          },
+          (newLocation) => {
+            if (isMounted) {
+              setLocation(newLocation);
+              // Use debounced version which includes rate limiting
+              debouncedGetLocation();
+            }
+          }
+        );
+      } catch (error) {
+        console.error("Error getting location:", error);
+      }
+    };
+
+    // Set up health metrics subscription
+    healthSubscription = supabase
       .channel("health_metrics_changes")
       .on(
         "postgres_changes",
@@ -607,12 +760,16 @@ export default function HomeScreen() {
           table: "health_metrics",
           filter: `user_id=eq.${session.user.id}`,
         },
-        () => fetchHealthMetrics()
+        () => {
+          if (isMounted) {
+            fetchHealthMetrics();
+          }
+        }
       )
       .subscribe();
 
-    // Set up subscription for emergency contacts changes
-    const contactsSubscription = supabase
+    // Set up emergency contacts subscription
+    contactsSubscription = supabase
       .channel("emergency_contacts_changes")
       .on(
         "postgres_changes",
@@ -622,14 +779,29 @@ export default function HomeScreen() {
           table: "emergency_contacts",
           filter: `user_id=eq.${session.user.id}`,
         },
-        () => fetchHealthMetrics()
+        () => {
+          if (isMounted) {
+            fetchHealthMetrics();
+          }
+        }
       )
       .subscribe();
 
-    // Cleanup subscriptions on unmount
+    // Initialize location
+    setupLocation();
+
+    // Cleanup function
     return () => {
-      supabase.removeChannel(subscription);
-      supabase.removeChannel(contactsSubscription);
+      isMounted = false;
+      if (locationSubscription) {
+        locationSubscription.remove();
+      }
+      if (healthSubscription) {
+        supabase.removeChannel(healthSubscription);
+      }
+      if (contactsSubscription) {
+        supabase.removeChannel(contactsSubscription);
+      }
     };
   }, [session?.user?.id, fetchHealthMetrics]);
 
@@ -649,11 +821,11 @@ export default function HomeScreen() {
                 {session?.user?.user_metadata?.full_name || "User"}
               </ThemedText>
               <ThemedText style={styles.locationText}>
-                {location
-                  ? `${location.city || ""}${
-                      location.city && location.region ? ", " : ""
-                    }${location.region || ""}` || "Location unavailable"
-                  : "Location unavailable"}
+                {locationInfo
+                  ? `${locationInfo.city || ""}${
+                      locationInfo.city && locationInfo.region ? ", " : ""
+                    }${locationInfo.region || ""}`
+                  : "Location not available"}
               </ThemedText>
             </View>
             <TouchableOpacity onPress={() => router.push("/(app)/profile")}>
@@ -707,6 +879,69 @@ export default function HomeScreen() {
               ))}
             </View>
           </View>
+
+          {/* Map View */}
+          <View style={styles.mapContainer}>
+            {location ? (
+              <MapView
+                ref={mapRef}
+                style={styles.map}
+                initialRegion={{
+                  latitude: location.coords.latitude,
+                  longitude: location.coords.longitude,
+                  latitudeDelta: 0.01,
+                  longitudeDelta: 0.01,
+                }}
+                showsUserLocation={true}
+                showsMyLocationButton={true}
+                followsUserLocation={true}
+                showsCompass={true}
+                scrollEnabled={true}
+                zoomEnabled={true}
+                pitchEnabled={true}
+                rotateEnabled={true}
+              >
+                <Marker
+                  coordinate={{
+                    latitude: location.coords.latitude,
+                    longitude: location.coords.longitude,
+                  }}
+                  title="Your Location"
+                  description="Your current location will be shared in emergency"
+                />
+              </MapView>
+            ) : (
+              <View style={styles.mapPlaceholder}>
+                <ActivityIndicator size="large" color={colors.tint} />
+                <ThemedText style={styles.loadingText}>
+                  Loading map...
+                </ThemedText>
+              </View>
+            )}
+          </View>
+
+          {/* Emergency Button */}
+          <TouchableOpacity
+            style={styles.emergencyButton}
+            onPress={sendEmergencyReport}
+            disabled={isSendingEmergency}
+          >
+            {isSendingEmergency ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Ionicons
+                  name="warning"
+                  size={24}
+                  color="#fff"
+                  style={styles.emergencyIcon}
+                />
+                <ThemedText style={styles.emergencyButtonText}>
+                  SEND EMERGENCY ALERT
+                </ThemedText>
+              </>
+            )}
+          </TouchableOpacity>
         </ScrollView>
       </ThemedView>
     </SafeAreaView>
@@ -714,6 +949,49 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  // Map styles
+  mapContainer: {
+    height: 300,
+    width: "100%",
+    borderRadius: 12,
+    overflow: "hidden",
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  map: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  mapPlaceholder: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.1)",
+  },
+  loadingText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: "#fff",
+  },
+  // Emergency button styles
+  emergencyButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FF3B30",
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 80,
+  },
+  emergencyButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  emergencyIcon: {
+    marginRight: 10,
+  },
   // Main container styles
   container: {
     flex: 1,

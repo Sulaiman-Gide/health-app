@@ -260,7 +260,7 @@ export default function UsersScreen() {
             />
           </TouchableOpacity>
           <TextInput
-            style={[styles.searchInput, { color: colors.text }]}
+            style={styles.searchInput}
             placeholder="Search users..."
             placeholderTextColor={colors.placeholder}
             value={searchQuery}
@@ -366,7 +366,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: "100%",
     fontSize: 16,
-    color: "#F1F5F9",
+    color: "#efefef",
   },
   clearButton: {
     padding: 4,

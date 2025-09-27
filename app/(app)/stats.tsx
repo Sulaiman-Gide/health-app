@@ -42,8 +42,8 @@ export default function StatsScreen() {
       if (error) throw error;
       setContacts(data || []);
     } catch (error) {
-      console.error("Error fetching contacts:", error);
-      Alert.alert("Error", "Failed to load emergency contacts");
+      //console.error("Error fetching contacts:", error);
+      //Alert.alert("Error", "Failed to load emergency contacts");
     } finally {
       setLoading(false);
     }

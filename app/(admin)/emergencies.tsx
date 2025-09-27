@@ -4,7 +4,7 @@ import { Colors } from "@/constants/theme";
 import { supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -16,6 +16,7 @@ import {
   useColorScheme,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 type EmergencyReport = {
   id: string;
@@ -45,40 +46,51 @@ export default function EmergenciesScreen() {
   >("all");
   const router = useRouter();
 
-  const fetchEmergencies = async () => {
+  const fetchEmergencies = useCallback(async () => {
     try {
       setIsLoading(true);
 
-      let query = supabase
+      // First, get all emergency reports
+      const { data: reports, error: reportsError } = await supabase
         .from("emergency_reports")
-        .select(
-          `
-          *,
-          profiles:user_id (email, full_name)
-        `
-        )
+        .select("*")
         .order("created_at", { ascending: false });
 
-      if (searchQuery) {
-        query = query.or(
-          `description.ilike.%${searchQuery}%,emergency_type.ilike.%${searchQuery}%`
-        );
+      if (reportsError) throw reportsError;
+
+      // If no reports, set empty array and return
+      if (!reports || reports.length === 0) {
+        setEmergencies([]);
+        return;
       }
 
-      if (statusFilter !== "all") {
-        query = query.eq("status", statusFilter);
-      }
+      // Get all user IDs from the reports
+      const userIds = reports.map((report) => report.user_id).filter(Boolean);
 
-      const { data, error } = await query;
+      // Fetch all related profiles in a single query
+      const { data: profiles, error: profilesError } = await supabase
+        .from("profiles")
+        .select("id, email, full_name, username")
+        .in("id", userIds);
 
-      if (error) throw error;
+      if (profilesError) throw profilesError;
 
-      // Transform the data to include user details
-      const transformedData = data.map((report: any) => ({
-        ...report,
-        user_email: report.profiles?.email || "Unknown",
-        user_name: report.profiles?.full_name || "Unknown User",
-      }));
+      // Create a map of user ID to profile for easy lookup
+      const profileMap = new Map();
+      profiles?.forEach((profile) => {
+        profileMap.set(profile.id, profile);
+      });
+
+      // Combine the data
+      const transformedData = reports.map((report) => {
+        const userProfile = profileMap.get(report.user_id) || {};
+        return {
+          ...report,
+          user_email: userProfile.email || "Unknown",
+          user_name:
+            userProfile.full_name || userProfile.username || "Unknown User",
+        };
+      });
 
       setEmergencies(transformedData);
     } catch (error) {
@@ -87,7 +99,7 @@ export default function EmergenciesScreen() {
       setIsLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [searchQuery, statusFilter]);
 
   useEffect(() => {
     fetchEmergencies();
@@ -152,14 +164,17 @@ export default function EmergenciesScreen() {
   const renderEmergencyItem = ({ item }: { item: EmergencyReport }) => (
     <View style={[styles.emergencyCard, { backgroundColor: colors.card }]}>
       <View style={styles.emergencyHeader}>
-        <View>
-          <ThemedText type="subtitle">
+        <View style={{ flex: 1 }}>
+          <ThemedText
+            type="subtitle"
+            style={{ fontSize: 16, fontWeight: "600" }}
+          >
             {item.emergency_type
               .replace(/_/g, " ")
               .replace(/\b\w/g, (l) => l.toUpperCase())}
           </ThemedText>
           <ThemedText style={styles.userInfo}>
-            Reported by: {item.user_name} ({item.user_email})
+            {item.user_name} • {item.user_email}
           </ThemedText>
         </View>
         <View
@@ -183,15 +198,35 @@ export default function EmergenciesScreen() {
       )}
 
       <View style={styles.metaContainer}>
-        <ThemedText style={styles.metaText}>
-          <Ionicons name="time-outline" size={14} color={colors.text} />{" "}
-          Reported: {formatDate(item.created_at)}
-        </ThemedText>
-        {item.updated_at !== item.created_at && (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            marginBottom: 4,
+          }}
+        >
+          <Ionicons
+            name="time-outline"
+            size={14}
+            color={colors.text}
+            style={{ marginRight: 6 }}
+          />
           <ThemedText style={styles.metaText}>
-            <Ionicons name="refresh-outline" size={14} color={colors.text} />{" "}
-            Updated: {formatDate(item.updated_at)}
+            Reported: {formatDate(item.created_at)}
           </ThemedText>
+        </View>
+        {item.updated_at !== item.created_at && (
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Ionicons
+              name="refresh-outline"
+              size={14}
+              color={colors.text}
+              style={{ marginRight: 6 }}
+            />
+            <ThemedText style={styles.metaText}>
+              Updated: {formatDate(item.updated_at)}
+            </ThemedText>
+          </View>
         )}
       </View>
 
@@ -294,114 +329,172 @@ export default function EmergenciesScreen() {
 
   if (isLoading && !refreshing) {
     return (
-      <ThemedView style={styles.loadingContainer}>
+      <ThemedView
+        style={[
+          styles.loadingContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
         <ActivityIndicator size="large" color={colors.tint} />
       </ThemedView>
     );
   }
 
   return (
-    <ThemedView style={styles.container}>
-      <View style={[styles.searchContainer, { backgroundColor: colors.card }]}>
-        <Ionicons
-          name="search"
-          size={20}
-          color={colors.text}
-          style={styles.searchIcon}
-        />
-        <TextInput
-          style={[styles.searchInput, { color: colors.text }]}
-          placeholder="Search emergencies..."
-          placeholderTextColor={colors.placeholder}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          onSubmitEditing={fetchEmergencies}
-        />
-        {searchQuery.length > 0 && (
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: "#0F172A" }]}>
+      <ThemedView style={[styles.container]}>
+        <View style={styles.header}>
           <TouchableOpacity
-            onPress={() => {
-              setSearchQuery("");
-              fetchEmergencies();
-            }}
-            style={styles.clearButton}
+            onPress={() => router.back()}
+            style={styles.backButton}
           >
-            <Ionicons
-              name="close-circle"
-              size={20}
-              color={colors.placeholder}
-            />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterContainer}
-      >
-        {["all", "pending", "in_progress", "resolved", "cancelled"].map(
-          (status) => (
-            <TouchableOpacity
-              key={status}
-              style={[
-                styles.filterButton,
-                statusFilter === status && {
-                  backgroundColor: getStatusColor(status),
-                  borderColor: getStatusColor(status),
-                },
-                statusFilter === status && styles.activeFilter,
-              ]}
-              onPress={() => setStatusFilter(status as any)}
+            <View
+              style={{
+                backgroundColor: "#142347",
+                padding: 12,
+                borderWidth: 1,
+                borderColor: "#18274a50",
+                borderRadius: 72,
+              }}
             >
-              <ThemedText
-                style={[
-                  styles.filterText,
-                  statusFilter === status && { color: "white" },
-                ]}
-              >
-                {status
-                  .replace(/_/g, " ")
-                  .replace(/\b\w/g, (l) => l.toUpperCase())}
-              </ThemedText>
-            </TouchableOpacity>
-          )
-        )}
-      </ScrollView>
-
-      <FlatList
-        data={emergencies}
-        renderItem={renderEmergencyItem}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={colors.tint}
+              <Ionicons name="arrow-back" size={24} color={"#fff"} />
+            </View>
+          </TouchableOpacity>
+          <ThemedText type="title" style={styles.headerTitle}>
+            Emergencies Reports
+          </ThemedText>
+          <View style={styles.headerRight} />
+        </View>
+        <View
+          style={[
+            styles.searchContainer,
+            {
+              outlineWidth: 0,
+              backgroundColor: "#121d36",
+              borderColor: "#94A3B8",
+              borderWidth: 1,
+            },
+          ]}
+        >
+          <Ionicons
+            name="search"
+            size={20}
+            color={"#efefef"}
+            style={styles.searchIcon}
           />
-        }
-        ListEmptyComponent={
-          <ThemedView style={styles.emptyContainer}>
-            <Ionicons
-              name="warning-outline"
-              size={48}
-              color={colors.placeholder}
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search emergencies..."
+            placeholderTextColor="#adb5bd"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onSubmitEditing={fetchEmergencies}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={() => {
+                setSearchQuery("");
+                fetchEmergencies();
+              }}
+              style={styles.clearButton}
+            >
+              <Ionicons name="close-circle" size={20} color="#adb5bd" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterContainer}
+        >
+          {["all", "pending", "in_progress", "resolved", "cancelled"].map(
+            (status) => (
+              <TouchableOpacity
+                key={status}
+                style={[
+                  styles.filterButton,
+                  statusFilter === status && {
+                    backgroundColor: getStatusColor(status),
+                    borderColor: getStatusColor(status),
+                  },
+                  statusFilter === status && styles.activeFilter,
+                ]}
+                onPress={() => setStatusFilter(status as any)}
+              >
+                <ThemedText
+                  style={[
+                    styles.filterText,
+                    statusFilter === status && styles.activeFilterText,
+                  ]}
+                >
+                  {status
+                    .replace(/_/g, " ")
+                    .replace(/\b\w/g, (l) => l.toUpperCase())}
+                </ThemedText>
+              </TouchableOpacity>
+            )
+          )}
+        </ScrollView>
+
+        <FlatList
+          data={emergencies}
+          renderItem={renderEmergencyItem}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#4361ee"
             />
-            <ThemedText style={styles.emptyText}>
-              {statusFilter === "all"
-                ? "No emergency reports found"
-                : `No ${statusFilter.replace(/_/g, " ")} emergencies`}
-            </ThemedText>
-          </ThemedView>
-        }
-      />
-    </ThemedView>
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="warning-outline" size={48} color="#adb5bd" />
+              <ThemedText style={styles.emptyText}>
+                {statusFilter === "all"
+                  ? "No emergency reports found"
+                  : `No ${statusFilter.replace(/_/g, " ")} emergencies`}
+              </ThemedText>
+            </View>
+          }
+        />
+      </ThemedView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#0F172A",
+  },
   container: {
     flex: 1,
+    backgroundColor: "#0F172A",
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: "600",
+    textAlign: "center",
+    flex: 1,
+    marginRight: 24,
+    color: "#F1F5F9",
+  },
+  backButton: {
+    padding: 4,
+    zIndex: 1,
+  },
+  headerRight: {
+    width: 24,
   },
   loadingContainer: {
     flex: 1,
@@ -412,34 +505,49 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     margin: 16,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    height: 48,
+    borderRadius: 12,
+    backgroundColor: "white",
+    paddingHorizontal: 16,
+    height: 50,
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   searchIcon: {
-    marginRight: 8,
-    opacity: 0.7,
+    marginRight: 10,
+    color: "#6c757d",
   },
   searchInput: {
     flex: 1,
     height: "100%",
     fontSize: 16,
+    color: "#efefef",
+    fontFamily: "System",
   },
   clearButton: {
     padding: 4,
   },
   filterContainer: {
+    maxHeight: 52,
     paddingHorizontal: 16,
-    paddingBottom: 8,
+    paddingBottom: 12,
   },
   filterButton: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    maxHeight: 52,
     paddingHorizontal: 16,
-    paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: "#E0E0E0",
+    borderColor: "#dee2e6",
     marginRight: 8,
-    backgroundColor: "transparent",
+    backgroundColor: "white",
   },
   activeFilter: {
     borderWidth: 0,
@@ -447,30 +555,42 @@ const styles = StyleSheet.create({
   filterText: {
     fontSize: 14,
     fontWeight: "500",
+    color: "#6c757d",
+  },
+  activeFilterText: {
+    color: "white",
   },
   listContent: {
     padding: 16,
     paddingTop: 8,
   },
   emergencyCard: {
+    backgroundColor: "white",
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   emergencyHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: 8,
+    alignItems: "center",
   },
   userInfo: {
-    fontSize: 12,
-    opacity: 0.7,
-    marginTop: 2,
+    fontSize: 13,
+    color: "#6c757d",
+    marginTop: 4,
   },
   statusBadge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
     alignSelf: "flex-start",
@@ -478,20 +598,23 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 12,
     fontWeight: "600",
+    textTransform: "capitalize",
   },
   description: {
     marginTop: 8,
     lineHeight: 20,
+    color: "#212529",
+    fontSize: 14,
   },
   metaContainer: {
     marginTop: 12,
     borderTopWidth: 1,
-    borderTopColor: "rgba(255, 255, 255, 0.1)",
+    borderTopColor: "#e9ecef",
     paddingTop: 12,
   },
   metaText: {
     fontSize: 12,
-    opacity: 0.7,
+    color: "#6c757d",
     marginBottom: 4,
   },
   actions: {
@@ -503,15 +626,17 @@ const styles = StyleSheet.create({
   actionButton: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 6,
     paddingHorizontal: 12,
-    borderRadius: 16,
-    margin: 4,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginRight: 8,
+    marginBottom: 8,
+    borderWidth: 1,
   },
   actionText: {
-    marginLeft: 4,
     fontSize: 12,
     fontWeight: "500",
+    marginLeft: 4,
   },
   emptyContainer: {
     flex: 1,
@@ -521,7 +646,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     marginTop: 16,
-    opacity: 0.7,
     textAlign: "center",
+    color: "#6c757d",
   },
 });
