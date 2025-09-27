@@ -1,21 +1,29 @@
-import { Stack, useRouter } from 'expo-router';
-import { useAuthStore } from '@/store/auth';
-import { Redirect } from 'expo-router';
-import { ActivityIndicator, View, TouchableOpacity, StyleSheet } from 'react-native';
-import { useColorScheme } from 'react-native';
-import { Colors } from '@/constants/theme';
-import { Ionicons } from '@expo/vector-icons';
-import { ThemedText } from '@/components/themed-text';
+import { Colors } from "@/constants/theme";
+import { useAuthStore } from "@/store/auth";
+import { Ionicons } from "@expo/vector-icons";
+import { Redirect, Stack, useRouter } from "expo-router";
+import {
+  ActivityIndicator,
+  StyleSheet,
+  TouchableOpacity,
+  useColorScheme,
+  View,
+} from "react-native";
 
 export default function AdminLayout() {
   const { session, isAdmin, isLoading, signOut } = useAuthStore();
   const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
+  const colors = Colors[colorScheme ?? "light"];
   const router = useRouter();
 
   if (isLoading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+      <View
+        style={[
+          styles.loadingContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
         <ActivityIndicator size="large" color={colors.tint} />
       </View>
     );
@@ -27,14 +35,14 @@ export default function AdminLayout() {
 
   const headerOptions = {
     headerStyle: {
-      backgroundColor: colorScheme === 'dark' ? '#121212' : '#fff',
+      backgroundColor: colorScheme === "dark" ? "#121212" : "#fff",
     },
-    headerTintColor: colorScheme === 'dark' ? '#fff' : '#000',
+    headerTintColor: colorScheme === "dark" ? "#fff" : "#000",
     headerRight: () => (
-      <TouchableOpacity 
+      <TouchableOpacity
         onPress={async () => {
           await signOut();
-          router.replace('/(auth)/login');
+          router.replace("/(auth)/login");
         }}
         style={styles.logoutButton}
       >
@@ -55,8 +63,8 @@ export default function AdminLayout() {
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   logoutButton: {
     marginRight: 16,

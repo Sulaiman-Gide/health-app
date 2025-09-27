@@ -12,7 +12,10 @@ type AuthState = {
   isAdmin: boolean;
   error: string | null;
   setSession: (session: Session | null) => void;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null; isAdmin?: boolean }>;
+  signIn: (
+    email: string,
+    password: string
+  ) => Promise<{ error: Error | null; isAdmin?: boolean }>;
   signUp: (
     email: string,
     password: string,
@@ -32,8 +35,8 @@ type AuthState = {
 };
 
 // Admin credentials
-const ADMIN_EMAIL = 'admin@health-app.com';
-const ADMIN_PASSWORD = 'admin123456';
+const ADMIN_EMAIL = "admin@health-app.com";
+const ADMIN_PASSWORD = "admin123456";
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   session: null,
@@ -43,7 +46,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setSession: (session) => set({ session, isLoading: false }),
 
-  signIn: async (email, password): Promise<{ error: AuthError | null; isAdmin?: boolean }> => {
+  signIn: async (
+    email,
+    password
+  ): Promise<{ error: AuthError | null; isAdmin?: boolean }> => {
     set({ isLoading: true, error: null });
     try {
       // Check for admin login
@@ -54,10 +60,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         });
 
         if (error) throw error;
-        
-        set({ 
+
+        set({
           session: data.session,
-          isAdmin: true 
+          isAdmin: true,
         });
         return { error: null, isAdmin: true };
       }
@@ -70,9 +76,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       if (error) throw error;
 
-      set({ 
+      set({
         session: data.session,
-        isAdmin: false 
+        isAdmin: false,
       });
       return { error: null };
     } catch (error) {
@@ -117,7 +123,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   signOut: async () => {
     const { error } = await supabase.auth.signOut();
     if (error) {
-      console.error('Error signing out:', error);
+      console.error("Error signing out:", error);
       return;
     }
     set({ session: null, isAdmin: false });

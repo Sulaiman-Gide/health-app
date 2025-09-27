@@ -20,17 +20,20 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 type User = {
   id: string;
-  email: string;
-  full_name: string | null;
+  email?: string;
+  full_name?: string | null;
+  avatar_url?: string | null;
+  is_active?: boolean;
   created_at: string;
-  last_sign_in_at: string | null;
-  is_active: boolean;
+  updated_at?: string;
+  last_sign_in_at?: string | null;
 };
 
 export default function UsersScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? "light"];
-  const [users, setUsers] = useState<User[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [displayedUsers, setDisplayedUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -41,26 +44,14 @@ export default function UsersScreen() {
     try {
       setIsLoading(true);
 
-      // First, get the current user's session
-      const { data: { user }, error: sessionError } = await supabase.auth.getUser();
-      if (sessionError) throw sessionError;
-      if (!user) throw new Error('No user session found');
+      const { data: users, error } = await supabase.rpc(
+        "get_users_with_profiles"
+      );
 
-      // Call a PostgreSQL function to get users with their emails
-      const { data: usersWithEmails, error: rpcError } = await supabase
-        .rpc('get_users_with_emails')
-        .order('created_at', { ascending: false });
+      if (error) throw error;
 
-      if (rpcError) throw rpcError;
-
-      // Filter by search query if provided
-      const filteredUsers = searchQuery
-        ? usersWithEmails.filter((user: User) =>
-            user.email?.toLowerCase().includes(searchQuery.toLowerCase())
-          )
-        : usersWithEmails;
-
-      setUsers(filteredUsers || []);
+      setAllUsers(users || []);
+      setDisplayedUsers(users || []);
     } catch (error) {
       console.error("Error fetching users:", error);
     } finally {
@@ -71,40 +62,73 @@ export default function UsersScreen() {
 
   useEffect(() => {
     fetchUsers();
-  }, [searchQuery]);
+  }, []);
+
+  const handleSearch = () => {
+    if (!searchQuery.trim()) {
+      setDisplayedUsers(allUsers);
+      return;
+    }
+
+    const filtered = allUsers.filter((user) => {
+      const searchLower = searchQuery.toLowerCase();
+      return (
+        user.email?.toLowerCase().includes(searchLower) ||
+        user.full_name?.toLowerCase().includes(searchLower) ||
+        user.id.toLowerCase().includes(searchLower)
+      );
+    });
+
+    setDisplayedUsers(filtered);
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
     await fetchUsers();
   };
 
-  const toggleUserStatus = async (userId: string, currentStatus: boolean) => {
+  const toggleUserStatus = async (
+    userId: string,
+    currentStatus: boolean | undefined
+  ) => {
+    // If currentStatus is undefined, default to false (inactive)
+    const newStatus = currentStatus === undefined ? true : !currentStatus;
+
     try {
       const { error } = await supabase
         .from("profiles")
-        .update({ is_active: !currentStatus })
+        .update({
+          is_active: newStatus,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", userId);
 
       if (error) throw error;
 
       // Update local state
-      setUsers(
-        users.map((user) =>
-          user.id === userId ? { ...user, is_active: !currentStatus } : user
-        )
+      const updatedUsers = allUsers.map((user) =>
+        user.id === userId ? { ...user, is_active: newStatus } : user
       );
+
+      setAllUsers(updatedUsers);
+      setDisplayedUsers(updatedUsers);
     } catch (error) {
       console.error("Error updating user status:", error);
     }
   };
 
-  const formatDate = (dateString: string | null) => {
+  const formatDate = (dateString: string | null | undefined) => {
     if (!dateString) return "Never";
-    return new Date(dateString).toLocaleString();
+    try {
+      return new Date(dateString).toLocaleString();
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      return "Unknown";
+    }
   };
 
   const renderUserItem = ({ item }: { item: User }) => (
-    <View style={[styles.userCard, { backgroundColor: colors.card }]}>
+    <View style={[styles.userCard, { backgroundColor: "#142347" }]}>
       <View style={styles.userInfo}>
         <View style={styles.userHeader}>
           <ThemedText type="subtitle" style={styles.userEmail}>
@@ -129,15 +153,28 @@ export default function UsersScreen() {
         {item.full_name && (
           <ThemedText style={styles.userName}>{item.full_name}</ThemedText>
         )}
-
         <View style={styles.userMeta}>
           <ThemedText style={styles.metaText}>
-            <Ionicons name="calendar-outline" size={14} color={colors.text} />{" "}
-            Joined: {new Date(item.created_at).toLocaleDateString()}
+            <Ionicons name="calendar-outline" size={14} color={"#efefef"} />{" "}
+            Registered:{" "}
+            {new Intl.DateTimeFormat("default", {
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            }).format(new Date(item.created_at))}
           </ThemedText>
           <ThemedText style={styles.metaText}>
-            <Ionicons name="time-outline" size={14} color={colors.text} /> Last
-            login: {formatDate(item.last_sign_in_at)}
+            <Ionicons name="time-outline" size={14} color={"#efefef"} /> Last
+            login:{" "}
+            {item.last_sign_in_at
+              ? new Intl.DateTimeFormat("default", {
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "numeric",
+                }).format(new Date(item.last_sign_in_at))
+              : "Never"}
           </ThemedText>
         </View>
       </View>
@@ -151,7 +188,7 @@ export default function UsersScreen() {
               borderColor: item.is_active ? "#F44336" : "#4CAF50",
             },
           ]}
-          onPress={() => toggleUserStatus(item.id, item.is_active)}
+          onPress={() => toggleUserStatus(item.id, item.is_active ?? false)}
           disabled={isLoading}
         >
           <ThemedText
@@ -185,7 +222,17 @@ export default function UsersScreen() {
             onPress={() => router.back()}
             style={styles.backButton}
           >
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
+            <View
+              style={{
+                backgroundColor: "#142347",
+                padding: 12,
+                borderWidth: 1,
+                borderColor: "#18274a50",
+                borderRadius: 72,
+              }}
+            >
+              <Ionicons name="arrow-back" size={24} color={"#fff"} />
+            </View>
           </TouchableOpacity>
           <ThemedText type="title" style={styles.headerTitle}>
             Users
@@ -204,22 +251,29 @@ export default function UsersScreen() {
             },
           ]}
         >
-          <Ionicons
-            name="search"
-            size={20}
-            color={colors.text}
-            style={styles.searchIcon}
-          />
+          <TouchableOpacity onPress={handleSearch}>
+            <Ionicons
+              name="search"
+              size={20}
+              color={"#efefef"}
+              style={styles.searchIcon}
+            />
+          </TouchableOpacity>
           <TextInput
             style={[styles.searchInput, { color: colors.text }]}
             placeholder="Search users..."
             placeholderTextColor={colors.placeholder}
             value={searchQuery}
             onChangeText={setSearchQuery}
+            onSubmitEditing={handleSearch}
+            returnKeyType="search"
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity
-              onPress={() => setSearchQuery("")}
+              onPress={() => {
+                setSearchQuery("");
+                setDisplayedUsers(allUsers);
+              }}
               style={styles.clearButton}
             >
               <Ionicons
@@ -232,7 +286,7 @@ export default function UsersScreen() {
         </View>
 
         <FlatList
-          data={users}
+          data={displayedUsers}
           renderItem={renderUserItem}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
@@ -262,6 +316,7 @@ export default function UsersScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
+    backgroundColor: "#0F172A",
   },
   container: {
     flex: 1,
@@ -280,6 +335,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     flex: 1,
     marginRight: 24,
+    color: "#F1F5F9",
   },
   backButton: {
     padding: 4,
@@ -300,6 +356,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     height: 48,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
   },
   searchIcon: {
     marginRight: 8,
@@ -309,6 +366,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: "100%",
     fontSize: 16,
+    color: "#F1F5F9",
   },
   clearButton: {
     padding: 4,
@@ -318,11 +376,17 @@ const styles = StyleSheet.create({
     paddingTop: 0,
   },
   userCard: {
+    backgroundColor: "#1E293B",
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.1)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   userInfo: {
     flex: 1,
@@ -334,41 +398,49 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   userEmail: {
+    color: "#F1F5F9",
+    fontWeight: "600",
+    fontSize: 16,
+    marginBottom: 4,
     flex: 1,
     marginRight: 8,
   },
   userName: {
-    opacity: 0.8,
+    color: "#94A3B8",
+    fontSize: 14,
     marginBottom: 8,
   },
   userMeta: {
     marginTop: 8,
   },
-  metaText: {
-    fontSize: 12,
-    opacity: 0.7,
-    marginBottom: 4,
-  },
   statusBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 12,
-    alignSelf: "flex-start",
+    borderRadius: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
   },
   statusText: {
-    fontSize: 12,
     color: "white",
     fontWeight: "600",
+    fontSize: 12,
+  },
+  metaText: {
+    fontSize: 12,
+    color: "#94A3B8",
+    marginBottom: 4,
   },
   toggleButton: {
     marginTop: 12,
-    paddingVertical: 8,
+    padding: 10,
     borderRadius: 8,
     alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
     borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
   },
   toggleButtonText: {
     fontWeight: "600",
+    color: "#F1F5F9",
   },
   emptyContainer: {
     flex: 1,
@@ -380,7 +452,8 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     marginTop: 16,
-    opacity: 0.7,
+    color: "#94A3B8",
     textAlign: "center",
+    opacity: 0.7,
   },
 });
