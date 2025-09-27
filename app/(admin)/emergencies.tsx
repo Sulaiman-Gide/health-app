@@ -23,6 +23,10 @@ type EmergencyReport = {
   user_id: string;
   user_email: string;
   user_name: string;
+  avatar_url?: string;
+  user_blood_type?: string;
+  user_seasonal_allergies?: string;
+  user_medications?: string;
   emergency_type: string;
   description: string;
   status: "pending" | "in_progress" | "resolved" | "cancelled";
@@ -67,29 +71,61 @@ export default function EmergenciesScreen() {
       // Get all user IDs from the reports
       const userIds = reports.map((report) => report.user_id).filter(Boolean);
 
-      // Fetch all related profiles in a single query
+      console.log("User IDs from reports:", userIds);
+
+      // Fetch all related profiles with additional fields
       const { data: profiles, error: profilesError } = await supabase
         .from("profiles")
-        .select("id, email, full_name, username")
+        .select(
+          "id, full_name, avatar_url, seasonal_allergies, medications, blood_type"
+        )
         .in("id", userIds);
+
+      console.log("Fetched profiles:", profiles);
 
       if (profilesError) throw profilesError;
 
       // Create a map of user ID to profile for easy lookup
       const profileMap = new Map();
       profiles?.forEach((profile) => {
+        console.log(
+          "Mapping profile:",
+          profile.id,
+          "with name:",
+          profile.full_name
+        );
         profileMap.set(profile.id, profile);
       });
+      console.log("Profile map size:", profileMap.size);
 
       // Combine the data
       const transformedData = reports.map((report) => {
+        console.log(
+          "Processing report:",
+          report.id,
+          "with user_id:",
+          report.user_id
+        );
         const userProfile = profileMap.get(report.user_id) || {};
-        return {
+        console.log(
+          "Found profile for user_id",
+          report.user_id,
+          ":",
+          userProfile
+        );
+
+        const transformed = {
           ...report,
-          user_email: userProfile.email || "Unknown",
-          user_name:
-            userProfile.full_name || userProfile.username || "Unknown User",
+          user_email: userProfile.full_name || "Unknown User",
+          user_name: userProfile.full_name || "Unknown User",
+          avatar_url: userProfile.avatar_url,
+          user_seasonal_allergies: userProfile.seasonal_allergies,
+          user_medications: userProfile.medications,
+          user_blood_type: userProfile.blood_type,
         };
+
+        console.log("Transformed report data:", transformed);
+        return transformed;
       });
 
       setEmergencies(transformedData);
@@ -115,13 +151,11 @@ export default function EmergenciesScreen() {
     newStatus: EmergencyReport["status"]
   ) => {
     try {
-      const { error } = await supabase
-        .from("emergency_reports")
-        .update({
-          status: newStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", id);
+      // Use the admin client to bypass RLS if needed
+      const { data, error } = await supabase.rpc("update_emergency_status", {
+        emergency_id: id,
+        new_status: newStatus,
+      });
 
       if (error) throw error;
 
@@ -162,7 +196,7 @@ export default function EmergenciesScreen() {
   };
 
   const renderEmergencyItem = ({ item }: { item: EmergencyReport }) => (
-    <View style={[styles.emergencyCard, { backgroundColor: colors.card }]}>
+    <View style={[styles.emergencyCard, { backgroundColor: "#142347" }]}>
       <View style={styles.emergencyHeader}>
         <View style={{ flex: 1 }}>
           <ThemedText
@@ -170,12 +204,27 @@ export default function EmergenciesScreen() {
             style={{ fontSize: 16, fontWeight: "600" }}
           >
             {item.emergency_type
-              .replace(/_/g, " ")
-              .replace(/\b\w/g, (l) => l.toUpperCase())}
+              ? item.emergency_type
+                  .replace(/_/g, " ")
+                  .replace(/\b\w/g, (l) => l.toUpperCase())
+              : "Emergency"}
           </ThemedText>
-          <ThemedText style={styles.userInfo}>
-            {item.user_name} • {item.user_email}
-          </ThemedText>
+          <ThemedText style={styles.userInfo}>{item.user_name}</ThemedText>
+          {item.user_blood_type && (
+            <ThemedText style={styles.userDetail}>
+              Blood Type: {item.user_blood_type}
+            </ThemedText>
+          )}
+          {item.user_seasonal_allergies && (
+            <ThemedText style={styles.userDetail}>
+              Allergies: {item.user_seasonal_allergies}
+            </ThemedText>
+          )}
+          {item.user_medications && (
+            <ThemedText style={styles.userDetail}>
+              Medications: {item.user_medications}
+            </ThemedText>
+          )}
         </View>
         <View
           style={[
@@ -205,12 +254,6 @@ export default function EmergenciesScreen() {
             marginBottom: 4,
           }}
         >
-          <Ionicons
-            name="time-outline"
-            size={14}
-            color={colors.text}
-            style={{ marginRight: 6 }}
-          />
           <ThemedText style={styles.metaText}>
             Reported: {formatDate(item.created_at)}
           </ThemedText>
@@ -219,7 +262,7 @@ export default function EmergenciesScreen() {
           <View style={{ flexDirection: "row", alignItems: "center" }}>
             <Ionicons
               name="refresh-outline"
-              size={14}
+              size={18}
               color={colors.text}
               style={{ marginRight: 6 }}
             />
@@ -403,63 +446,65 @@ export default function EmergenciesScreen() {
           )}
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterContainer}
-        >
-          {["all", "pending", "in_progress", "resolved", "cancelled"].map(
-            (status) => (
-              <TouchableOpacity
-                key={status}
-                style={[
-                  styles.filterButton,
-                  statusFilter === status && {
-                    backgroundColor: getStatusColor(status),
-                    borderColor: getStatusColor(status),
-                  },
-                  statusFilter === status && styles.activeFilter,
-                ]}
-                onPress={() => setStatusFilter(status as any)}
-              >
-                <ThemedText
+        <View style={{ gap: 16 }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterContainer}
+          >
+            {["all", "pending", "in_progress", "resolved", "cancelled"].map(
+              (status) => (
+                <TouchableOpacity
+                  key={status}
                   style={[
-                    styles.filterText,
-                    statusFilter === status && styles.activeFilterText,
+                    styles.filterButton,
+                    statusFilter === status && {
+                      backgroundColor: getStatusColor(status),
+                      borderColor: getStatusColor(status),
+                    },
+                    statusFilter === status && styles.activeFilter,
                   ]}
+                  onPress={() => setStatusFilter(status as any)}
                 >
-                  {status
-                    .replace(/_/g, " ")
-                    .replace(/\b\w/g, (l) => l.toUpperCase())}
-                </ThemedText>
-              </TouchableOpacity>
-            )
-          )}
-        </ScrollView>
+                  <ThemedText
+                    style={[
+                      styles.filterText,
+                      statusFilter === status && styles.activeFilterText,
+                    ]}
+                  >
+                    {status
+                      .replace(/_/g, " ")
+                      .replace(/\b\w/g, (l) => l.toUpperCase())}
+                  </ThemedText>
+                </TouchableOpacity>
+              )
+            )}
+          </ScrollView>
 
-        <FlatList
-          data={emergencies}
-          renderItem={renderEmergencyItem}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor="#4361ee"
-            />
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="warning-outline" size={48} color="#adb5bd" />
-              <ThemedText style={styles.emptyText}>
-                {statusFilter === "all"
-                  ? "No emergency reports found"
-                  : `No ${statusFilter.replace(/_/g, " ")} emergencies`}
-              </ThemedText>
-            </View>
-          }
-        />
+          <FlatList
+            data={emergencies}
+            renderItem={renderEmergencyItem}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor="#4361ee"
+              />
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="warning-outline" size={48} color="#adb5bd" />
+                <ThemedText style={styles.emptyText}>
+                  {statusFilter === "all"
+                    ? "No emergency reports found"
+                    : `No ${statusFilter.replace(/_/g, " ")} emergencies`}
+                </ThemedText>
+              </View>
+            }
+          />
+        </View>
       </ThemedView>
     </SafeAreaView>
   );
@@ -542,6 +587,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     maxHeight: 52,
+    minHeight: 40,
     paddingHorizontal: 16,
     borderRadius: 20,
     borderWidth: 1,
@@ -569,31 +615,28 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
   },
   emergencyHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: 8,
-    alignItems: "center",
   },
   userInfo: {
-    fontSize: 13,
-    color: "#6c757d",
+    fontSize: 16,
+    color: "#e2e8f0",
     marginTop: 4,
+    fontWeight: "500",
+  },
+  userDetail: {
+    fontSize: 14,
+    color: "#94a3b8",
+    marginTop: 2,
   },
   statusBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
-    alignSelf: "flex-start",
+    height: 32,
   },
   statusText: {
     fontSize: 12,
@@ -631,7 +674,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginRight: 8,
     marginBottom: 8,
-    borderWidth: 1,
   },
   actionText: {
     fontSize: 12,
