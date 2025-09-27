@@ -14,9 +14,9 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/android-icon-background.jpg",
+        "backgroundImage": "./assets/images/android-icon-background.jpg",
+        "monochromeImage": "./assets/images/android-icon-background.jpg"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -26,7 +26,7 @@
         "RECEIVE_BOOT_COMPLETED",
         "WAKE_LOCK"
       ],
-      "googleServicesFile": "./google-services.json"
+      "package": "com.dev_gide.healthapp"
     },
     "web": {
       "output": "static",
@@ -55,7 +55,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/notification-icon.png",
+          "icon": "./assets/images/bell.png",
           "color": "#ffffff",
           "sounds": []
         }
@@ -64,6 +64,11 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "13a9627e-c139-4c23-a267-dd74e008d5f3"
+      }
     }
   }
 }

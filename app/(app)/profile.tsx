@@ -37,14 +37,15 @@ const getTodaysSeed = () => {
     return yesterday.getTime().toString();
   }
 };
-
 const generateRandomHealthMetrics = (date: Date) => {
-  const seed = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+  // Create a more unique seed by including hours and minutes
+  const seed = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${date.getHours()}-${date.getMinutes()}`;
   const rng = seedrandom(seed);
 
-  const waterIntake = Math.floor(rng() * 3 + 1);
-  const sleepHours = Math.floor(rng() * 4 + 5);
-  const steps = Math.floor(rng() * 4000 + 3000);
+  // Generate random values with minimum thresholds
+  const waterIntake = Math.max(1, Math.floor(rng() * 3 + 1)); // 1-3
+  const sleepHours = Math.max(1, parseFloat((rng() * 4 + 5).toFixed(1))); // 5.0-9.0 with 1 decimal
+  const steps = Math.max(1000, Math.floor(rng() * 4000 + 3000)); // 3000-6999
 
   return {
     water_intake: waterIntake,
@@ -52,6 +53,19 @@ const generateRandomHealthMetrics = (date: Date) => {
     steps: steps,
     emergency_contacts_count: 0, // This will be updated from the database
   };
+};
+
+// Function to clear stored metrics
+const clearStoredMetrics = async () => {
+  try {
+    await AsyncStorage.removeItem("healthMetrics");
+    await AsyncStorage.removeItem("healthMetricsDate");
+    console.log("Stored metrics cleared successfully");
+    return true;
+  } catch (error) {
+    console.error("Error clearing stored metrics:", error);
+    return false;
+  }
 };
 
 export default function ProfileScreen() {

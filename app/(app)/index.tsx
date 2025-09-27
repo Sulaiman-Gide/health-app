@@ -10,6 +10,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import { useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -146,8 +147,8 @@ export default function HomeScreen() {
   const router = useRouter();
 
   // State management
-  const [greeting] = useState(getTimeBasedGreeting());
-  const [dailyValues, setDailyValues] = useState(() =>
+  const [greeting, setGreeting] = useState<string>(getTimeBasedGreeting());
+  const [dailyValues, setDailyValues] = useState<HealthMetrics>(
     generateDailyValues(getTodaysSeed())
   );
   const [healthMetrics, setHealthMetrics] = useState<Partial<HealthMetrics>>(
@@ -155,26 +156,93 @@ export default function HomeScreen() {
   );
   const [healthData, setHealthData] = useState<HealthMetric[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [location, setLocation] = useState<{
+
+  interface LocationInfo {
     city: string | null;
     region: string | null;
-  } | null>(null);
+    latitude: number | null;
+    longitude: number | null;
+  }
+
+  const [location, setLocation] = useState<LocationInfo | null>(null);
+
+  useEffect(() => {
+    const getLocation = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+          console.log("Location permission denied");
+          return;
+        }
+
+        // Get current position
+        const position = await Location.getCurrentPositionAsync({});
+
+        // Reverse geocode to get address information
+        const address = await Location.reverseGeocodeAsync({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+
+        if (address.length > 0) {
+          setLocation({
+            city: address[0].city || null,
+            region: address[0].region || null,
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          });
+        } else {
+          // If no address found, still set location with coordinates
+          setLocation({
+            city: null,
+            region: null,
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          });
+        }
+      } catch (error) {
+        console.error("Error getting location:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    getLocation();
+  }, []);
 
   const generateRandomHealthMetrics = (date: Date) => {
-    const seed = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    // Create a more unique seed by including hours and minutes
+    const seed = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${date.getHours()}-${date.getMinutes()}`;
     const rng = seedrandom(seed);
 
-    const waterIntake = Math.floor(rng() * 3 + 1);
-    const sleepHours = Math.floor(rng() * 4 + 5);
-    const steps = Math.floor(rng() * 4000 + 3000);
+    // Generate random values with minimum thresholds
+    const water_intake = Math.max(1, Math.floor(rng() * 3 + 1)); // 1-3
+    const sleep_hours = Math.max(1, parseFloat((rng() * 4 + 5).toFixed(1))); // 5.0-9.0 with 1 decimal
+    const steps = Math.max(1000, Math.floor(rng() * 4000 + 3000)); // 3000-6999
 
     return {
-      waterIntake,
-      sleepHours,
+      water_intake,
+      sleep_hours,
       steps,
       emergency_contacts_count: healthMetrics.emergency_contacts_count || 0,
     };
   };
+
+  // Clear any existing stored metrics to ensure fresh data
+  const clearStoredMetrics = async () => {
+    try {
+      await AsyncStorage.removeItem("healthMetrics");
+      await AsyncStorage.removeItem("healthMetricsDate");
+      console.log("Stored metrics cleared successfully");
+    } catch (error) {
+      console.error("Error clearing stored metrics:", error);
+    }
+  };
+
+  // Call this function once to clear any existing stored metrics
+  useEffect(() => {
+    clearStoredMetrics();
+  }, []);
 
   useEffect(() => {
     const updateHealthMetrics = async () => {
@@ -393,6 +461,8 @@ export default function HomeScreen() {
         setLocation({
           city: address[0].city || null,
           region: address[0].region || null,
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
         });
       }
     } catch (error) {
@@ -565,6 +635,7 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#151718" }}>
+      <StatusBar style="light" />
       <ThemedView style={styles.container}>
         <ScrollView
           style={styles.scrollView}
@@ -620,7 +691,7 @@ export default function HomeScreen() {
                   onPress={() => {
                     if (item.id === "contacts") {
                       router.navigate({
-                        pathname: "/(app)/emergency-contacts",
+                        pathname: "/(app)/stats",
                         params: { userId: session?.user?.id },
                       });
                     } else {

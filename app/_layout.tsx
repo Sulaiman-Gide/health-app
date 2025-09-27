@@ -11,25 +11,38 @@ import { useAuthStore } from '@/store/auth';
 import * as Linking from 'expo-linking';
 import { supabase } from '@/lib/supabase';
 
-// This hook will protect the route access based on authentication state
+// This hook will protect the route access based on authentication state and admin status
 function useProtectedRoute(isAuthenticated: boolean) {
   const segments = useSegments();
   const router = useRouter();
-  const { isLoading } = useAuthStore();
+  const { isLoading, isAdmin } = useAuthStore();
 
   useEffect(() => {
     if (isLoading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const inAdminGroup = segments[0] === '(admin)';
+    const inAppGroup = segments[0] === '(app)';
 
-    if (!isAuthenticated && !inAuthGroup) {
-      // Redirect to the sign-in page if not authenticated
-      router.replace('/(auth)/login');
-    } else if (isAuthenticated && inAuthGroup) {
-      // Redirect away from the sign-in page if authenticated
-      router.replace('/(app)');
+    if (!isAuthenticated) {
+      // If not authenticated, redirect to login unless already there
+      if (!inAuthGroup) {
+        router.replace('/(auth)/login');
+      }
+    } else {
+      // Handle authenticated users
+      if (inAuthGroup) {
+        // If on auth pages, redirect based on admin status
+        router.replace(isAdmin ? '/(admin)' : '/(app)');
+      } else if (inAdminGroup && !isAdmin) {
+        // If trying to access admin area without admin rights, redirect to app
+        router.replace('/(app)');
+      } else if (inAppGroup && isAdmin && segments.length === 1) {
+        // If admin is on the main app screen, redirect to admin dashboard
+        router.replace('/(admin)');
+      }
     }
-  }, [isAuthenticated, segments, isLoading]);
+  }, [isAuthenticated, segments, isLoading, isAdmin]);
 }
 
 export default function RootLayout() {

@@ -53,10 +53,14 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     if (!validate()) return;
 
-    const { error } = await signIn(email, password);
+    const { error, isAdmin } = await signIn(email, password);
 
     if (!error) {
-      router.replace("/(app)");
+      if (isAdmin) {
+        router.replace("/(admin)");
+      } else {
+        router.replace("/(app)");
+      }
     }
   };
 

@@ -9,9 +9,10 @@ type AuthErrorResponse = {
 type AuthState = {
   session: Session | null;
   isLoading: boolean;
+  isAdmin: boolean;
   error: string | null;
   setSession: (session: Session | null) => void;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signIn: (email: string, password: string) => Promise<{ error: Error | null; isAdmin?: boolean }>;
   signUp: (
     email: string,
     password: string,
@@ -30,16 +31,38 @@ type AuthState = {
   }) => Promise<{ error: Error | null }>;
 };
 
+// Admin credentials
+const ADMIN_EMAIL = 'admin@health-app.com';
+const ADMIN_PASSWORD = 'admin123456';
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   session: null,
   isLoading: true,
+  isAdmin: false,
   error: null,
 
   setSession: (session) => set({ session, isLoading: false }),
 
-  signIn: async (email, password): Promise<{ error: AuthError | null }> => {
+  signIn: async (email, password): Promise<{ error: AuthError | null; isAdmin?: boolean }> => {
     set({ isLoading: true, error: null });
     try {
+      // Check for admin login
+      if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: ADMIN_EMAIL,
+          password: ADMIN_PASSWORD,
+        });
+
+        if (error) throw error;
+        
+        set({ 
+          session: data.session,
+          isAdmin: true 
+        });
+        return { error: null, isAdmin: true };
+      }
+
+      // Regular user login
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -47,7 +70,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       if (error) throw error;
 
-      set({ session: data.session });
+      set({ 
+        session: data.session,
+        isAdmin: false 
+      });
       return { error: null };
     } catch (error) {
       const authError = error as AuthError;
@@ -89,14 +115,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
-    try {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      set({ session: null });
-    } catch (error) {
-      console.error("Error signing out:", error);
-      throw error;
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error('Error signing out:', error);
+      return;
     }
+    set({ session: null, isAdmin: false });
   },
 
   resetPassword: async (email): Promise<{ error: AuthError | null }> => {

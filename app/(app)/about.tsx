@@ -119,7 +119,7 @@ export default function AboutScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.linkButton}
-              onPress={() => router.push("/(app)/terms")}
+              onPress={() => router.push("/(app)/about")}
             >
               <ThemedText style={[styles.linkText, { color: colors.tint }]}>
                 Terms of Service
