@@ -25,17 +25,19 @@ type EmergencyReport = {
   user_name: string;
   avatar_url?: string;
   user_blood_type?: string;
-  user_seasonal_allergies?: string;
-  user_medications?: string;
+  user_seasonal_allergies?: string | string[];
+  user_medications?: string | string[];
   emergency_type: string;
   description: string;
   status: "pending" | "in_progress" | "resolved" | "cancelled";
   created_at: string;
   updated_at: string;
-  location: {
+  location?: {
     latitude: number;
     longitude: number;
   } | null;
+  latitude?: number;
+  longitude?: number;
 };
 
 export default function EmergenciesScreen() {
@@ -277,7 +279,30 @@ export default function EmergenciesScreen() {
           <>
             <TouchableOpacity
               style={[styles.actionButton, { backgroundColor: "#2196F320" }]}
-              onPress={() => updateStatus(item.id, "in_progress")}
+              onPress={() => {
+                // Check for location in both formats
+                const latitude = item.location?.latitude ?? item.latitude;
+                const longitude = item.location?.longitude ?? item.longitude;
+
+                if (latitude === undefined || longitude === undefined) {
+                  console.error(
+                    "No location data available for this emergency",
+                    item
+                  );
+                  return;
+                }
+
+                updateStatus(item.id, "in_progress");
+                router.push({
+                  pathname: "/map",
+                  params: {
+                    latitude: latitude.toString(),
+                    longitude: longitude.toString(),
+                    title: `Emergency: ${item.emergency_type}`,
+                    description: item.description || "No additional details",
+                  },
+                });
+              }}
             >
               <Ionicons name="play" size={16} color="#2196F3" />
               <ThemedText style={[styles.actionText, { color: "#2196F3" }]}>
