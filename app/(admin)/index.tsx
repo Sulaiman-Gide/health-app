@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/auth";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,6 +14,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   View,
+  useColorScheme,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -21,18 +23,72 @@ type StatsType = {
   activeUsers: number;
   emergencyReports: number;
   todayEmergencies: number;
+  allEmergencies: number;
+};
+
+// Helper function to format time ago
+const formatTimeAgo = (dateString: string) => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+  let interval = Math.floor(seconds / 31536000);
+  if (interval >= 1) return `${interval} year${interval === 1 ? "" : "s"} ago`;
+
+  interval = Math.floor(seconds / 2592000);
+  if (interval >= 1) return `${interval} month${interval === 1 ? "" : "s"} ago`;
+
+  interval = Math.floor(seconds / 86400);
+  if (interval >= 1) return `${interval} day${interval === 1 ? "" : "s"} ago`;
+
+  interval = Math.floor(seconds / 3600);
+  if (interval >= 1) return `${interval} hour${interval === 1 ? "" : "s"} ago`;
+
+  interval = Math.floor(seconds / 60);
+  if (interval >= 1)
+    return `${interval} minute${interval === 1 ? "" : "s"} ago`;
+
+  return "Just now";
+};
+
+// Helper function to get status color
+const getStatusColor = (status: string) => {
+  switch (status) {
+    case "pending":
+      return "#FFA000";
+    case "in_progress":
+      return "#2196F3";
+    case "resolved":
+      return "#4CAF50";
+    case "cancelled":
+      return "#F44336";
+    default:
+      return "#9E9E9E";
+  }
 };
 
 export default function AdminDashboard() {
-  const colors = Colors.light;
-  const { session } = useAuthStore();
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme || "light"];
+  const { session, signOut } = useAuthStore();
   const user = session?.user;
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      router.replace("/(auth)/login");
+    } catch (error) {
+      console.error("Error logging out:", error);
+    }
+  };
   const [stats, setStats] = useState<StatsType>({
     totalUsers: 0,
     activeUsers: 0,
     emergencyReports: 0,
     todayEmergencies: 0,
+    allEmergencies: 0,
   });
+  const [emergencies, setEmergencies] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const router = useRouter();
@@ -68,8 +124,13 @@ export default function AdminDashboard() {
         .select("*", { count: "exact", head: true })
         .gt("last_sign_in_at", thirtyDaysAgo.toISOString());
 
-      // Fetch total emergency reports
-      const { count: emergencyReports } = await supabase
+      // Fetch active emergencies (pending + in_progress)
+      const { count: activeEmergencies } = await supabase
+        .from("emergency_reports")
+        .select("*", { count: "exact", head: true })
+        .in("status", ["pending", "in_progress"]);
+
+      const { count: allEmergencies } = await supabase
         .from("emergency_reports")
         .select("*", { count: "exact", head: true });
 
@@ -78,13 +139,33 @@ export default function AdminDashboard() {
         .from("emergency_reports")
         .select("*", { count: "exact", head: true })
         .gte("created_at", `${today}T00:00:00.000Z`)
-        .lte("created_at", `${today}T23:59:59.999Z`);
+        .lt("created_at", `${today}T23:59:59.999Z`);
+
+      // Fetch recent emergencies for activity feed
+      const { data: recentEmergencies } = await supabase
+        .from("emergency_reports")
+        .select(
+          `
+          *,
+          profiles:user_id (id, full_name)
+        `
+        )
+        .order("updated_at", { ascending: false })
+        .limit(5);
+
+      setEmergencies(
+        recentEmergencies?.map((emergency) => ({
+          ...emergency,
+          user_name: emergency.profiles?.full_name || "Unknown User",
+        })) || []
+      );
 
       setStats({
         totalUsers: totalUsers || 0,
-        activeUsers: activeUsers || 0,
-        emergencyReports: emergencyReports || 0,
-        todayEmergencies: todayEmergencies || 0,
+        activeUsers: activeUsers || 0, // Active users (last 30 days)
+        emergencyReports: activeEmergencies || 0, // Active emergencies (pending + in_progress)
+        todayEmergencies: todayEmergencies || 0, // Emergencies reported today
+        allEmergencies: allEmergencies || 0, // All emergencies regardless of status
       });
     } catch (error) {
       console.error("Error fetching stats:", error);
@@ -167,6 +248,7 @@ export default function AdminDashboard() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#0F172A" }}>
+      <StatusBar style="light" />
       <ThemedView style={styles.container}>
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -193,52 +275,58 @@ export default function AdminDashboard() {
                 </ThemedText>
               </ThemedText>
             </View>
-            <View style={styles.lastUpdated}>
-              <Ionicons
-                name="time-outline"
-                size={14}
-                color="#94A3B8"
-                style={styles.clockIcon}
-              />
-              <ThemedText style={styles.lastUpdatedText}>
-                {new Date().toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </ThemedText>
+            <View style={styles.headerActions}>
+              <View style={styles.lastUpdated}>
+                <Ionicons
+                  name="time-outline"
+                  size={14}
+                  color="#94A3B8"
+                  style={styles.clockIcon}
+                />
+                <ThemedText style={styles.lastUpdatedText}>
+                  {new Date().toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </ThemedText>
+              </View>
             </View>
           </View>
 
           {/* Stats Grid */}
           <View style={styles.statsGrid}>
-            <StatCard
-              title="Total Users"
-              value={stats.totalUsers}
-              icon="people"
-              color="#60A5FA"
-              isLoading={isLoading && !refreshing}
-            />
-            <StatCard
-              title="Active Users"
-              value={stats.activeUsers}
-              icon="person"
-              color="#34D399"
-              isLoading={isLoading && !refreshing}
-            />
-            <StatCard
-              title="Emergencies"
-              value={stats.emergencyReports}
-              icon="warning"
-              color="#F87171"
-              isLoading={isLoading && !refreshing}
-            />
-            <StatCard
-              title="Today"
-              value={stats.todayEmergencies}
-              icon="alert-circle"
-              color="#FBBF24"
-              isLoading={isLoading && !refreshing}
-            />
+            <View style={styles.statsRow}>
+              <StatCard
+                title="Active Emergencies"
+                value={stats.emergencyReports}
+                icon="warning"
+                color="#F59E0B"
+                isLoading={isLoading}
+              />
+              <StatCard
+                title="All Emergencies"
+                value={stats.allEmergencies}
+                icon="list"
+                color="#4F46E5"
+                isLoading={isLoading}
+              />
+            </View>
+            <View style={styles.statsRow}>
+              <StatCard
+                title="Total Users"
+                value={stats.totalUsers}
+                icon="people"
+                color="#10B981"
+                isLoading={isLoading}
+              />
+              <StatCard
+                title="Today's Emergencies"
+                value={stats.todayEmergencies}
+                icon="today"
+                color="#EC4899"
+                isLoading={isLoading}
+              />
+            </View>
           </View>
 
           {/* Quick Actions */}
@@ -265,8 +353,19 @@ export default function AdminDashboard() {
             </View>
           </View>
 
+          <View>
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={handleLogout}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="log-out-outline" size={20} color="#F87171" />
+              <ThemedText style={styles.logoutText}>Logout</ThemedText>
+            </TouchableOpacity>
+          </View>
+
           {/* Recent Activity */}
-          <View style={styles.section}>
+          {/** <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <ThemedText style={styles.sectionTitle}>
                 Recent Activity
@@ -274,50 +373,60 @@ export default function AdminDashboard() {
               <View style={styles.divider} />
             </View>
             <View style={styles.recentActivity}>
-              <View style={styles.activityItem}>
-                <View
-                  style={[
-                    styles.activityIcon,
-                    { backgroundColor: "#60A5FA20" },
-                  ]}
-                >
-                  <Ionicons name="person-add" size={18} color="#60A5FA" />
-                </View>
-                <View style={styles.activityContent}>
-                  <ThemedText style={styles.activityText}>
-                    <ThemedText style={{ fontWeight: "600" }}>
-                      5 new users
-                    </ThemedText>{" "}
-                    registered today
+              {emergencies.length > 0 ? (
+                emergencies
+                  .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+                  .slice(0, 5)
+                  .map((emergency, index) => (
+                    <View key={`${emergency.id}-${index}`} style={styles.activityItem}>
+                      <View
+                        style={[
+                          styles.activityIcon,
+                          { 
+                            backgroundColor: getStatusColor(emergency.status) + '20',
+                            borderColor: getStatusColor(emergency.status),
+                            borderWidth: 1
+                          },
+                        ]}
+                      >
+                        <Ionicons 
+                          name={
+                            emergency.status === 'resolved' ? 'checkmark-circle' :
+                            emergency.status === 'cancelled' ? 'close-circle' :
+                            emergency.status === 'in_progress' ? 'time' : 'warning'
+                          } 
+                          size={18} 
+                          color={getStatusColor(emergency.status)} 
+                        />
+                      </View>
+                      <View style={styles.activityContent}>
+                        <ThemedText style={styles.activityText}>
+                          <ThemedText style={{ fontWeight: "600" }}>
+                            {emergency.emergency_type.replace(/_/g, ' ')}
+                            {emergency.status === 'resolved' ? ' resolved' :
+                             emergency.status === 'cancelled' ? ' cancelled' :
+                             emergency.status === 'in_progress' ? ' in progress' : ' reported'}
+                          </ThemedText>
+                          {emergency.user_name && (
+                            <ThemedText> by {emergency.user_name}</ThemedText>
+                          )}
+                        </ThemedText>
+                        <ThemedText style={styles.activityTime}>
+                          {formatTimeAgo(emergency.updated_at)}
+                        </ThemedText>
+                      </View>
+                    </View>
+                  ))
+              ) : (
+                <View style={styles.noActivityContainer}>
+                  <Ionicons name="time-outline" size={32} color="#94a3b8" />
+                  <ThemedText style={styles.noActivityText}>
+                    No recent activities
                   </ThemedText>
-                  <ThemedText style={styles.activityTime}>
-                    2 hours ago
-                  </ThemedText>
                 </View>
-              </View>
-              <View style={styles.activityItem}>
-                <View
-                  style={[
-                    styles.activityIcon,
-                    { backgroundColor: "#F8717120" },
-                  ]}
-                >
-                  <Ionicons name="warning" size={18} color="#F87171" />
-                </View>
-                <View style={styles.activityContent}>
-                  <ThemedText style={styles.activityText}>
-                    <ThemedText style={{ fontWeight: "600" }}>
-                      New emergency
-                    </ThemedText>{" "}
-                    reported
-                  </ThemedText>
-                  <ThemedText style={styles.activityTime}>
-                    1 hour ago
-                  </ThemedText>
-                </View>
-              </View>
+              )}
             </View>
-          </View>
+          </View> **/}
         </ScrollView>
       </ThemedView>
     </SafeAreaView>
@@ -328,6 +437,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#0F172A",
+  },
+  statsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 16,
   },
   loadingContainer: {
     flex: 1,
@@ -375,6 +489,26 @@ const styles = StyleSheet.create({
   lastUpdatedText: {
     fontSize: 13,
     color: "#94A3B8",
+    fontWeight: "500",
+  },
+  headerActions: {
+    alignItems: "flex-end",
+    gap: 12,
+  },
+  logoutButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(239, 68, 68, 0.2)",
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+  },
+  logoutText: {
+    color: "#F87171",
+    fontSize: 16,
     fontWeight: "500",
   },
   statsGrid: {
@@ -477,11 +611,14 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 12,
   },
-  activityContent: {
-    flex: 1,
-    justifyContent: "center",
+  noActivityContainer: {
+    alignItems: "center",
+    padding: 20,
+  },
+  noActivityText: {
+    color: "#94a3b8",
+    marginTop: 8,
   },
   activityText: {
     fontSize: 14,
@@ -491,5 +628,9 @@ const styles = StyleSheet.create({
   activityTime: {
     fontSize: 12,
     color: "#64748B",
+  },
+  activityContent: {
+    flex: 1,
+    marginLeft: 12,
   },
 });

@@ -241,6 +241,14 @@ export default function EmergencyMapScreen() {
           <ThemedText type="title" style={styles.headerTitle}>
             Emergency Location
           </ThemedText>
+          <View
+            style={{
+              padding: 12,
+              borderWidth: 1,
+
+              borderRadius: 72,
+            }}
+          />
           <View />
         </View>
 

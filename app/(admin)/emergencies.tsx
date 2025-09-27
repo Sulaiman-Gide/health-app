@@ -43,6 +43,7 @@ type EmergencyReport = {
 export default function EmergenciesScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? "light"];
+  const router = useRouter();
   const [emergencies, setEmergencies] = useState<EmergencyReport[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -50,17 +51,29 @@ export default function EmergenciesScreen() {
   const [statusFilter, setStatusFilter] = useState<
     "all" | EmergencyReport["status"]
   >("all");
-  const router = useRouter();
-
   const fetchEmergencies = useCallback(async () => {
     try {
       setIsLoading(true);
 
-      // First, get all emergency reports
-      const { data: reports, error: reportsError } = await supabase
+      // Build the base query
+      let query = supabase
         .from("emergency_reports")
         .select("*")
         .order("created_at", { ascending: false });
+
+      // Apply status filter if not 'all'
+      if (statusFilter !== "all") {
+        query = query.eq("status", statusFilter);
+      }
+
+      // Apply search query if it exists
+      if (searchQuery.trim() !== "") {
+        query = query.or(
+          `emergency_type.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%,user_name.ilike.%${searchQuery}%`
+        );
+      }
+
+      const { data: reports, error: reportsError } = await query;
 
       if (reportsError) throw reportsError;
 
@@ -137,7 +150,7 @@ export default function EmergenciesScreen() {
       setIsLoading(false);
       setRefreshing(false);
     }
-  }, [searchQuery, statusFilter]);
+  }, [searchQuery, statusFilter, router]);
 
   useEffect(() => {
     fetchEmergencies();
@@ -542,6 +555,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#0F172A",
+    paddingBottom: 200,
   },
   header: {
     flexDirection: "row",
