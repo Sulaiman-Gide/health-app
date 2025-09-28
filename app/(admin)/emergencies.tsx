@@ -145,7 +145,7 @@ export default function EmergenciesScreen() {
 
       setEmergencies(transformedData);
     } catch (error) {
-      console.error("Error fetching emergency reports:", error);
+      console.log("Error fetching emergency reports:", error);
     } finally {
       setIsLoading(false);
       setRefreshing(false);
@@ -192,7 +192,7 @@ export default function EmergenciesScreen() {
         )
       );
     } catch (error) {
-      console.error("Error updating emergency status:", error);
+      console.log("Error updating emergency status:", error);
     }
   };
 
@@ -298,7 +298,7 @@ export default function EmergenciesScreen() {
                 const longitude = item.location?.longitude ?? item.longitude;
 
                 if (latitude === undefined || longitude === undefined) {
-                  console.error(
+                  console.log(
                     "No location data available for this emergency",
                     item
                   );

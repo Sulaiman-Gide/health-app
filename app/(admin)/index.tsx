@@ -78,7 +78,7 @@ export default function AdminDashboard() {
       await signOut();
       router.replace("/(auth)/login");
     } catch (error) {
-      console.error("Error logging out:", error);
+      console.log("Error logging out:", error);
     }
   };
   const [stats, setStats] = useState<StatsType>({
@@ -168,7 +168,7 @@ export default function AdminDashboard() {
         allEmergencies: allEmergencies || 0, // All emergencies regardless of status
       });
     } catch (error) {
-      console.error("Error fetching stats:", error);
+      console.log("Error fetching stats:", error);
     } finally {
       setIsLoading(false);
     }

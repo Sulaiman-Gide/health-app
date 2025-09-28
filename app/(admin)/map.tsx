@@ -138,7 +138,7 @@ export default function EmergencyMapScreen() {
       // Fallback to web URL if platform-specific URL fails
       return `https://www.google.com/maps/dir/?api=1&destination=${endLat},${endLng}`;
     } catch (error) {
-      console.error("Error getting directions:", error);
+      console.log("Error getting directions:", error);
       return `https://www.google.com/maps/dir/?api=1&destination=${endLat},${endLng}`;
     }
   };
@@ -164,7 +164,7 @@ export default function EmergencyMapScreen() {
         );
       }
     } catch (error) {
-      console.error("Error opening maps:", error);
+      console.log("Error opening maps:", error);
     }
   };
 

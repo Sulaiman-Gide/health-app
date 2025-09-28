@@ -51,14 +51,6 @@
         {
           "motionPermission": "Allow Health App to access your motion activity and step count."
         }
-      ],
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/images/bell.png",
-          "color": "#ffffff",
-          "sounds": []
-        }
       ]
     ],
     "experiments": {

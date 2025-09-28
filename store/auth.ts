@@ -123,7 +123,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   signOut: async () => {
     const { error } = await supabase.auth.signOut();
     if (error) {
-      console.error("Error signing out:", error);
+      console.log("Error signing out:", error);
       return;
     }
     set({ session: null, isAdmin: false });
@@ -193,7 +193,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       );
 
       if (profileError) {
-        console.error("Database error:", profileError);
+        console.log("Database error:", profileError);
         // If the RPC fails, try a direct update as fallback
         const { error: directUpdateError } = await supabase
           .from("profiles")
@@ -223,7 +223,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       return { error: null };
     } catch (error) {
-      console.error("Error updating profile:", error);
+      console.log("Error updating profile:", error);
       const authError = error as AuthError;
       set({ error: authError.message });
       return { error: authError };

@@ -16,9 +16,19 @@ function useProtectedRoute(isAuthenticated: boolean) {
   const segments = useSegments();
   const router = useRouter();
   const { isLoading, isAdmin } = useAuthStore();
+  const [isNavigationReady, setIsNavigationReady] = useState(false);
+
+  // Track when navigation is ready
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsNavigationReady(true);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
-    if (isLoading) return;
+    // Only proceed if navigation is ready and auth state is loaded
+    if (isLoading || !isNavigationReady) return;
 
     const inAuthGroup = segments[0] === '(auth)';
     const inAdminGroup = segments[0] === '(admin)';
@@ -27,22 +37,34 @@ function useProtectedRoute(isAuthenticated: boolean) {
     if (!isAuthenticated) {
       // If not authenticated, redirect to login unless already there
       if (!inAuthGroup) {
-        router.replace('/(auth)/login');
+        const timer = setTimeout(() => {
+          router.replace('/(auth)/login');
+        }, 50);
+        return () => clearTimeout(timer);
       }
     } else {
       // Handle authenticated users
       if (inAuthGroup) {
         // If on auth pages, redirect based on admin status
-        router.replace(isAdmin ? '/(admin)' : '/(app)');
+        const timer = setTimeout(() => {
+          router.replace(isAdmin ? '/(admin)' : '/(app)');
+        }, 50);
+        return () => clearTimeout(timer);
       } else if (inAdminGroup && !isAdmin) {
         // If trying to access admin area without admin rights, redirect to app
-        router.replace('/(app)');
+        const timer = setTimeout(() => {
+          router.replace('/(app)');
+        }, 50);
+        return () => clearTimeout(timer);
       } else if (inAppGroup && isAdmin && segments.length === 1) {
         // If admin is on the main app screen, redirect to admin dashboard
-        router.replace('/(admin)');
+        const timer = setTimeout(() => {
+          router.replace('/(admin)');
+        }, 50);
+        return () => clearTimeout(timer);
       }
     }
-  }, [isAuthenticated, segments, isLoading, isAdmin]);
+  }, [isAuthenticated, segments, isLoading, isAdmin, isNavigationReady]);
 }
 
 export default function RootLayout() {

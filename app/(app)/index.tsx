@@ -9,7 +9,6 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import * as Location from "expo-location";
-import * as Notifications from "expo-notifications";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { debounce } from "lodash";
@@ -90,17 +89,6 @@ interface HealthMetricParams {
   goal: number;
   unit: string;
 }
-
-// Configure notifications
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
 
 const HealthCard = ({
   title,
@@ -260,7 +248,7 @@ export default function HomeScreen() {
         "Help is on the way! Your location and medical information have been shared with emergency contacts."
       );
     } catch (error) {
-      console.error("Error sending emergency report:", error);
+      console.log("Error sending emergency report:", error);
       Alert.alert(
         "Error",
         "Failed to send emergency report. Please try again."
